@@ -7,21 +7,37 @@ Unit tests for the LangGraph agent components.
 import pytest
 from src.agent.state import AgentState, AuditEntry, ToolCall
 
+
 class TestAgentState:
     """Tests for the AgentState schema."""
 
     def test_create_default_state(self):
-        """Test creating a state with default values."""
-        state = AgentState(query="Test query")
-        assert state.query == "Test query"
-        assert state.is_complete is False
-        assert state.current_step == 0
-        assert state.current_iteration == 0
-        assert state.max_iterations == 10
-        assert state.final_response is None
-        assert state.errors == []
-        assert state.audit_entries == []
-        assert state.tools_called == []
+        """Test creating a state with default values via TypedDict."""
+        state: AgentState = {
+            "query": "Test query",
+            "messages": [],
+            "audit_entries": [],
+            "current_step": 0,
+            "tools_called": [],
+            "selected_tool": None,
+            "tool_input": {},
+            "is_complete": False,
+            "max_iterations": 10,
+            "current_iteration": 0,
+            "requires_tool_call": False,
+            "final_response": None,
+            "reasoning": None,
+            "errors": [],
+        }
+        assert state["query"] == "Test query"
+        assert state["is_complete"] is False
+        assert state["current_step"] == 0
+        assert state["current_iteration"] == 0
+        assert state["max_iterations"] == 10
+        assert state["final_response"] is None
+        assert state["errors"] == []
+        assert state["audit_entries"] == []
+        assert state["tools_called"] == []
 
     def test_audit_entry_creation(self):
         """Test creating an audit entry."""

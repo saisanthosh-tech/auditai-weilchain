@@ -3,12 +3,32 @@ AuditAI - LangGraph Agent Graph Definition
 
 Defines the main workflow graph for the AuditAI agent. Wires together reasoning,
 tool selection, execution, auditing, and termination/retry logic.
+
+Uses the correct LangGraph API:
+  - add_edge(START, ...) for entry point
+  - add_edge(..., ...) for linear transitions
+  - add_conditional_edges(...) for branching
+  - END for terminal nodes
 """
 
-from langgraph.graph import StateGraph
+from langgraph.graph import StateGraph, START, END
 
 from src.agent.state import AgentState
 from src.agent import nodes
+
+
+def should_continue(state: dict) -> str:
+    """
+    Routing function for the termination check node.
+    Determines whether the agent should continue reasoning or finish.
+    """
+    if state.get("errors") and len(state["errors"]) > 0:
+        return "error"
+    if state.get("is_complete", False):
+        return "done"
+    if state.get("requires_tool_call", False):
+        return "use_tool"
+    return "done"
 
 
 def create_agent(audit_logger=None, available_tools=None, max_iterations=10):
@@ -17,16 +37,15 @@ def create_agent(audit_logger=None, available_tools=None, max_iterations=10):
 
     Args:
         audit_logger: Optional audit logger for recording steps.
-        available_tools: List of tool instances/classes available to the agent.
+        available_tools: List of tool instances available to the agent.
         max_iterations: Max number of reasoning/tool call cycles.
 
     Returns:
-        An initialized LangGraph StateGraph agent instance.
+        A compiled LangGraph agent ready to invoke.
     """
-    # Construct the graph, wiring to node functions from nodes.py
     g = StateGraph(AgentState)
 
-    # Mapping node names to functions
+    # Add nodes
     g.add_node("reasoning", nodes.reasoning_node)
     g.add_node("tool_selection", nodes.tool_selection_node)
     g.add_node("tool_execution", nodes.tool_execution_node)
@@ -34,32 +53,66 @@ def create_agent(audit_logger=None, available_tools=None, max_iterations=10):
     g.add_node("final_response", nodes.final_response_node)
     g.add_node("error_handling", nodes.error_handling_node)
 
-    # Entry point
-    g.set_entry("reasoning")
+    # Entry point: start with reasoning
+    g.add_edge(START, "reasoning")
 
-    # Graph transitions
-    g.add_transition("reasoning", "tool_selection")
-    g.add_transition("tool_selection", "tool_execution")
-    g.add_transition("tool_execution", "termination_check")
-    g.add_transition("termination_check", {
-        "continue": "reasoning",
-        "done": "final_response",
-        "error": "error_handling"
-    })
-    g.add_transition("error_handling", "final_response")
-    g.add_transition("final_response", None)  # Terminal
+    # Reasoning -> Tool Selection
+    g.add_edge("reasoning", "tool_selection")
 
-    # Context
-    g.set_context(audit_logger=audit_logger,
-                  available_tools=available_tools or [],
-                  max_iterations=max_iterations)
+    # Tool Selection -> conditional: either execute tool or go to termination check
+    g.add_conditional_edges(
+        "tool_selection",
+        lambda state: "execute" if state.get("requires_tool_call") else "check",
+        {
+            "execute": "tool_execution",
+            "check": "termination_check",
+        },
+    )
 
-    return g.compile()
+    # Tool Execution -> Termination Check
+    g.add_edge("tool_execution", "termination_check")
+
+    # Termination Check -> conditional: continue, done, or error
+    g.add_conditional_edges(
+        "termination_check",
+        should_continue,
+        {
+            "use_tool": "reasoning",
+            "done": "final_response",
+            "error": "error_handling",
+        },
+    )
+
+    # Error handling -> Final Response
+    g.add_edge("error_handling", "final_response")
+
+    # Final Response -> END
+    g.add_edge("final_response", END)
+
+    # Store tool and logger config in graph metadata
+    config = {
+        "audit_logger": audit_logger,
+        "available_tools": available_tools or [],
+        "max_iterations": max_iterations,
+    }
+
+    compiled = g.compile()
+    # Attach config so nodes can access it
+    compiled._auditai_config = config
+
+    return compiled
 
 
-# Optionally, easy shortcut for fast tests/imports
 def load_default_agent():
     """Returns the default AuditAI agent with no-op logger and default tools."""
     from src.audit.logger import AuditLogger
-    # from src.tools.[...] import PriceFeedTool, etc.
-    return create_agent(audit_logger=AuditLogger(on_chain=False), available_tools=[], max_iterations=10)
+    from src.tools.price_feed import PriceFeedTool
+    from src.tools.news_feed import NewsFeedTool
+    from src.tools.onchain_data import OnchainDataTool
+
+    tools = [PriceFeedTool(), NewsFeedTool(), OnchainDataTool()]
+    return create_agent(
+        audit_logger=AuditLogger(on_chain=False),
+        available_tools=tools,
+        max_iterations=10,
+    )

@@ -5,11 +5,13 @@ AuditAI - Agent State Schema
 Defines the state schema for the LangGraph agent.
 The state is passed between nodes in the agent graph
 and tracks the full lifecycle of a query.
+
+Uses TypedDict for LangGraph compatibility.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, TypedDict
 from pydantic import BaseModel, Field
 from langgraph.graph.message import add_messages
 
@@ -56,63 +58,38 @@ class ToolCall(BaseModel):
     latency_ms: float = Field(default=0.0, description="Tool execution time in milliseconds")
 
 
-class AgentState(BaseModel):
+class AgentState(TypedDict, total=False):
     """
     The complete state of the AuditAI agent.
 
     This state is passed between nodes in the LangGraph graph.
-    It tracks the user query, conversation messages, audit trail,
-    tool calls, and workflow control flags.
+    Uses TypedDict for proper LangGraph compatibility.
     """
 
     # --- Core Query ---
-    query: str = Field(description="The original user query")
+    query: str
 
     # --- Conversation Messages ---
-    messages: Annotated[list, add_messages] = Field(
-        default_factory=list,
-        description="Conversation messages (LangGraph message format)",
-    )
+    messages: Annotated[list, add_messages]
 
     # --- Audit Trail ---
-    audit_entries: list[AuditEntry] = Field(
-        default_factory=list,
-        description="Ordered list of audit entries for this workflow",
-    )
-    current_step: int = Field(
-        default=0, description="Current step number in the workflow"
-    )
+    audit_entries: list[dict[str, Any]]
+    current_step: int
 
     # --- Tool Tracking ---
-    tools_called: list[ToolCall] = Field(
-        default_factory=list,
-        description="List of all tool calls made during this workflow",
-    )
-    available_tools: list[str] = Field(
-        default_factory=list,
-        description="Names of tools available to the agent",
-    )
+    tools_called: list[dict[str, Any]]
+    selected_tool: str | None
+    tool_input: dict[str, Any]
 
     # --- Workflow Control ---
-    is_complete: bool = Field(
-        default=False, description="Whether the agent has finished processing"
-    )
-    max_iterations: int = Field(
-        default=10, description="Maximum number of reasoning iterations"
-    )
-    current_iteration: int = Field(
-        default=0, description="Current reasoning iteration"
-    )
-    requires_tool_call: bool = Field(
-        default=False, description="Whether the agent needs to call a tool next"
-    )
+    is_complete: bool
+    max_iterations: int
+    current_iteration: int
+    requires_tool_call: bool
 
     # --- Final Output ---
-    final_response: str | None = Field(
-        default=None, description="The agent's final response to the user"
-    )
+    final_response: str | None
+    reasoning: str | None
 
     # --- Error Handling ---
-    errors: list[str] = Field(
-        default_factory=list, description="Any errors encountered during processing"
-    )
+    errors: list[str]
